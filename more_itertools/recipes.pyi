@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Sequence
+from decimal import Decimal
+from fractions import Fraction
 from typing import (
     Any,
     Callable,
@@ -32,7 +34,6 @@ __all__ = [
     'nth_combination',
     'padnone',
     'pad_none',
-    'pairwise',
     'partition',
     'polynomial_eval',
     'polynomial_from_roots',
@@ -43,10 +44,12 @@ __all__ = [
     'reshape',
     'random_combination_with_replacement',
     'random_combination',
+    'random_derangement',
     'random_permutation',
     'random_product',
     'repeatfunc',
     'roundrobin',
+    'running_median',
     'sieve',
     'sliding_window',
     'subslices',
@@ -67,6 +70,7 @@ _T = TypeVar('_T')
 _T1 = TypeVar('_T1')
 _T2 = TypeVar('_T2')
 _U = TypeVar('_U')
+_NumberT = TypeVar("_NumberT", float, Decimal, Fraction)
 
 def take(n: int, iterable: Iterable[_T]) -> list[_T]: ...
 def tabulate(
@@ -92,7 +96,6 @@ def flatten(listOfLists: Iterable[Iterable[_T]]) -> Iterator[_T]: ...
 def repeatfunc(
     func: Callable[..., _U], times: int | None = ..., *args: Any
 ) -> Iterator[_U]: ...
-def pairwise(iterable: Iterable[_T]) -> Iterator[tuple[_T, _T]]: ...
 def grouper(
     iterable: Iterable[_T],
     n: int,
@@ -168,15 +171,21 @@ def iter_index(
     stop: int | None = ...,
 ) -> Iterator[int]: ...
 def sieve(n: int) -> Iterator[int]: ...
-def batched(
+def _batched(
     iterable: Iterable[_T], n: int, *, strict: bool = False
 ) -> Iterator[tuple[_T, ...]]: ...
+
+batched = _batched
+
 def transpose(
     it: Iterable[Iterable[_T]],
 ) -> Iterator[tuple[_T, ...]]: ...
+@overload
 def reshape(
-    matrix: Iterable[Iterable[_T]], cols: int
+    matrix: Iterable[Iterable[_T]], shape: int
 ) -> Iterator[tuple[_T, ...]]: ...
+@overload
+def reshape(matrix: Iterable[Any], shape: Iterable[int]) -> Iterator[Any]: ...
 def matmul(m1: Sequence[_T], m2: Sequence[_T]) -> Iterator[tuple[_T]]: ...
 def _factor_trial(n: int) -> Iterator[int]: ...
 def _factor_pollard(n: int) -> int: ...
@@ -190,3 +199,7 @@ def _strong_probable_prime(n: int, base: int) -> bool: ...
 def is_prime(n: int) -> bool: ...
 def loops(n: int) -> Iterator[None]: ...
 def multinomial(*counts: int) -> int: ...
+def running_median(
+    iterable: Iterable[_NumberT], *, maxlen: int | None = ...
+) -> Iterator[_NumberT]: ...
+def random_derangement(iterable: Iterable[_T]) -> tuple[_T, ...]: ...

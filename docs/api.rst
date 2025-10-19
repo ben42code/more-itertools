@@ -72,7 +72,6 @@ These tools yield windows of items from an iterable.
 
 **Itertools recipes**
 
-.. autofunction:: pairwise
 .. autofunction:: triplewise
 .. autofunction:: sliding_window
 .. autofunction:: subslices
@@ -118,11 +117,11 @@ These tools combine multiple iterables.
 .. autofunction:: interleave
 .. autofunction:: interleave_longest
 .. autofunction:: interleave_evenly
+.. autofunction:: interleave_randomly
 .. autofunction:: partial_product
 .. autofunction:: sort_together
 .. autofunction:: value_chain
 .. autofunction:: zip_offset(*iterables, offsets, longest=False, fillvalue=None)
-.. autofunction:: zip_equal
 .. autofunction:: zip_broadcast(*objects, scalar_types=(str, bytes), strict=False)
 
 ----
@@ -194,6 +193,7 @@ These tools yield certain items from an iterable.
 .. autofunction:: filter_map
 .. autofunction:: iter_suppress
 .. autofunction:: nth_or_last(iterable, n[, default])
+.. autofunction:: extract
 .. autofunction:: unique_in_window
 .. autofunction:: duplicates_everseen
 .. autofunction:: duplicates_justseen
@@ -233,6 +233,7 @@ These tools yield combinatorial arrangements of items from iterables.
 .. autofunction:: combination_index
 .. autofunction:: permutation_index
 .. autofunction:: combination_with_replacement_index
+.. autofunction:: derangements
 .. autofunction:: gray_product
 .. autofunction:: outer_product
 .. autofunction:: powerset_of_sets
@@ -246,6 +247,7 @@ These tools yield combinatorial arrangements of items from iterables.
 .. autofunction:: random_permutation
 .. autofunction:: random_combination
 .. autofunction:: random_combination_with_replacement
+.. autofunction:: random_derangement
 .. autofunction:: nth_product
 .. autofunction:: nth_permutation
 .. autofunction:: nth_combination
@@ -294,6 +296,7 @@ These tools work with most numeric data types.
 .. autofunction:: polynomial_from_roots
 .. autofunction:: polynomial_derivative
 .. autofunction:: polynomial_eval
+.. autofunction:: running_median
 .. autofunction:: sum_of_squares
 
 

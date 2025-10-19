@@ -29,7 +29,6 @@ from typing_extensions import Protocol
 __all__ = [
     'AbortThread',
     'SequenceView',
-    'UnequalIterablesError',
     'adjacent',
     'all_unique',
     'always_iterable',
@@ -61,6 +60,7 @@ __all__ = [
     'duplicates_justseen',
     'classify_unique',
     'exactly_n',
+    'extract',
     'filter_except',
     'filter_map',
     'first',
@@ -73,6 +73,7 @@ __all__ = [
     'interleave',
     'interleave_evenly',
     'interleave_longest',
+    'interleave_randomly',
     'intersperse',
     'is_sorted',
     'islice_extended',
@@ -139,7 +140,6 @@ __all__ = [
     'windowed_complete',
     'with_iter',
     'zip_broadcast',
-    'zip_equal',
     'zip_offset',
 ]
 
@@ -264,6 +264,7 @@ def interleave_longest(*iterables: Iterable[_T]) -> Iterator[_T]: ...
 def interleave_evenly(
     iterables: list[Iterable[_T]], lengths: list[int] | None = ...
 ) -> Iterator[_T]: ...
+def interleave_randomly(*iterables: Iterable[_T]) -> Iterable[_T]: ...
 def collapse(
     iterable: Iterable[Any],
     base_type: _ClassInfo | None = ...,
@@ -340,46 +341,6 @@ def stagger(
     longest: bool = ...,
     fillvalue: _U = ...,
 ) -> Iterator[tuple[_T | _U, ...]]: ...
-
-class UnequalIterablesError(ValueError):
-    def __init__(self, details: tuple[int, int, int] | None = ...) -> None: ...
-
-# zip_equal
-@overload
-def zip_equal(__iter1: Iterable[_T1]) -> Iterator[tuple[_T1]]: ...
-@overload
-def zip_equal(
-    __iter1: Iterable[_T1], __iter2: Iterable[_T2]
-) -> Iterator[tuple[_T1, _T2]]: ...
-@overload
-def zip_equal(
-    __iter1: Iterable[_T1], __iter2: Iterable[_T2], __iter3: Iterable[_T3]
-) -> Iterator[tuple[_T1, _T2, _T3]]: ...
-@overload
-def zip_equal(
-    __iter1: Iterable[_T1],
-    __iter2: Iterable[_T2],
-    __iter3: Iterable[_T3],
-    __iter4: Iterable[_T4],
-) -> Iterator[tuple[_T1, _T2, _T3, _T4]]: ...
-@overload
-def zip_equal(
-    __iter1: Iterable[_T1],
-    __iter2: Iterable[_T2],
-    __iter3: Iterable[_T3],
-    __iter4: Iterable[_T4],
-    __iter5: Iterable[_T5],
-) -> Iterator[tuple[_T1, _T2, _T3, _T4, _T5]]: ...
-@overload
-def zip_equal(
-    __iter1: Iterable[Any],
-    __iter2: Iterable[Any],
-    __iter3: Iterable[Any],
-    __iter4: Iterable[Any],
-    __iter5: Iterable[Any],
-    __iter6: Iterable[Any],
-    *iterables: Iterable[Any],
-) -> Iterator[tuple[Any, ...]]: ...
 
 # zip_offset
 @overload
@@ -565,7 +526,7 @@ class islice_extended(Generic[_T], Iterator[_T]):
 
 def always_reversible(iterable: Iterable[_T]) -> Iterator[_T]: ...
 def consecutive_groups(
-    iterable: Iterable[_T], ordering: Callable[[_T], int] = ...
+    iterable: Iterable[_T], ordering: None | Callable[[_T], int] = ...
 ) -> Iterator[Iterator[_T]]: ...
 @overload
 def difference(
@@ -923,7 +884,9 @@ def filter_map(
     func: Callable[[_T], _V | None],
     iterable: Iterable[_T],
 ) -> Iterator[_V]: ...
-def powerset_of_sets(iterable: Iterable[_T]) -> Iterator[set[_T]]: ...
+def powerset_of_sets(
+    iterable: Iterable[_T], *, baseset: type = ...
+) -> Iterator[set[_T]] | Iterator[frozenset[_T]]: ...
 def join_mappings(
     **field_to_map: Mapping[_T, _V],
 ) -> dict[_T, dict[str, _V]]: ...
@@ -934,10 +897,13 @@ def doublestarmap(
 def dft(xarr: Sequence[complex]) -> Iterator[complex]: ...
 def idft(Xarr: Sequence[complex]) -> Iterator[complex]: ...
 def _nth_prime_ub(n: int) -> float: ...
-def nth_prime(n: int) -> int: ...
+def nth_prime(n: int, *, approximate: bool = ...) -> int: ...
 def argmin(
     iterable: Iterable[_T], *, key: Callable[[_T], _U] | None = ...
 ) -> int: ...
 def argmax(
     iterable: Iterable[_T], *, key: Callable[[_T], _U] | None = ...
 ) -> int: ...
+def extract(
+    iterable: Iterable[_T], indices: Iterable[int]
+) -> Iterator[_T]: ...

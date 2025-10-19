@@ -10,10 +10,11 @@ Some backward-compatible usability improvements have been made.
 
 import random
 
+from bisect import bisect_left, insort
 from collections import deque
 from contextlib import suppress
-from collections.abc import Sized
-from functools import lru_cache, partial
+from functools import lru_cache, reduce
+from heapq import heappush, heappushpop
 from itertools import (
     accumulate,
     chain,
@@ -23,15 +24,17 @@ from itertools import (
     cycle,
     groupby,
     islice,
+    pairwise,
     product,
     repeat,
     starmap,
+    takewhile,
     tee,
     zip_longest,
 )
 from math import prod, comb, isqrt, gcd
-from operator import mul, not_, itemgetter, getitem
-from random import randrange, sample, choice
+from operator import mul, is_, not_, itemgetter, getitem, index
+from random import randrange, sample, choice, shuffle
 from sys import hexversion
 
 __all__ = [
@@ -56,7 +59,6 @@ __all__ = [
     'nth_combination',
     'padnone',
     'pad_none',
-    'pairwise',
     'partition',
     'polynomial_eval',
     'polynomial_from_roots',
@@ -67,10 +69,12 @@ __all__ = [
     'reshape',
     'random_combination_with_replacement',
     'random_combination',
+    'random_derangement',
     'random_permutation',
     'random_product',
     'repeatfunc',
     'roundrobin',
+    'running_median',
     'sieve',
     'sliding_window',
     'subslices',
@@ -89,20 +93,13 @@ __all__ = [
 _marker = object()
 
 
-# zip with strict is available for Python 3.10+
+# heapq max-heap functions are available for Python 3.14+
 try:
-    zip(strict=True)
-except TypeError:
-    _zip_strict = zip
-else:
-    _zip_strict = partial(zip, strict=True)
-
-
-# math.sumprod is available for Python 3.12+
-try:
-    from math import sumprod as _sumprod
-except ImportError:
-    _sumprod = lambda x, y: dotproduct(x, y)
+    from heapq import heappush_max, heappushpop_max
+except ImportError:  # pragma: no cover
+    _max_heap_available = False
+else:  # pragma: no cover
+    _max_heap_available = True
 
 
 def take(n, iterable):
@@ -147,14 +144,12 @@ def tail(n, iterable):
     ['E', 'F', 'G']
 
     """
-    # If the given iterable has a length, then we can use islice to get its
-    # final elements. Note that if the iterable is not actually Iterable,
-    # either islice or deque will throw a TypeError. This is why we don't
-    # check if it is Iterable.
-    if isinstance(iterable, Sized):
-        return islice(iterable, max(0, len(iterable) - n), None)
-    else:
+    try:
+        size = len(iterable)
+    except TypeError:
         return iter(deque(iterable, maxlen=n))
+    else:
+        return islice(iterable, max(0, size - n), None)
 
 
 def consume(iterator, n=None):
@@ -286,6 +281,13 @@ def dotproduct(vec1, vec2):
     return sum(map(mul, vec1, vec2))
 
 
+# math.sumprod is available for Python 3.12+
+try:
+    from math import sumprod as _sumprod
+except ImportError:  # pragma: no cover
+    _sumprod = dotproduct
+
+
 def flatten(listOfLists):
     """Return an iterator flattening one level of nesting in a list of lists.
 
@@ -325,67 +327,6 @@ def repeatfunc(func, times=None, *args):
     return starmap(func, repeat(args, times))
 
 
-def _pairwise(iterable):
-    """Returns an iterator of paired items, overlapping, from the original
-
-    >>> take(4, pairwise(count()))
-    [(0, 1), (1, 2), (2, 3), (3, 4)]
-
-    On Python 3.10 and above, this is an alias for :func:`itertools.pairwise`.
-
-    """
-    a, b = tee(iterable)
-    next(b, None)
-    return zip(a, b)
-
-
-try:
-    from itertools import pairwise as itertools_pairwise
-except ImportError:
-    pairwise = _pairwise
-else:
-
-    def pairwise(iterable):
-        return itertools_pairwise(iterable)
-
-    pairwise.__doc__ = _pairwise.__doc__
-
-
-class UnequalIterablesError(ValueError):
-    def __init__(self, details=None):
-        msg = 'Iterables have different lengths'
-        if details is not None:
-            msg += (': index 0 has length {}; index {} has length {}').format(
-                *details
-            )
-
-        super().__init__(msg)
-
-
-def _zip_equal_generator(iterables):
-    for combo in zip_longest(*iterables, fillvalue=_marker):
-        for val in combo:
-            if val is _marker:
-                raise UnequalIterablesError()
-        yield combo
-
-
-def _zip_equal(*iterables):
-    # Check whether the iterables are all the same size.
-    try:
-        first_size = len(iterables[0])
-        for i, it in enumerate(iterables[1:], 1):
-            size = len(it)
-            if size != first_size:
-                raise UnequalIterablesError(details=(first_size, i, size))
-        # All sizes are equal, we can use the built-in zip.
-        return zip(*iterables)
-    # If any one of the iterables didn't have a length, start reading
-    # them until one runs out.
-    except TypeError:
-        return _zip_equal_generator(iterables)
-
-
 def grouper(iterable, n, incomplete='fill', fillvalue=None):
     """Group elements from *iterable* into fixed-length groups of length *n*.
 
@@ -406,24 +347,25 @@ def grouper(iterable, n, incomplete='fill', fillvalue=None):
     >>> list(grouper('ABCDEFG', 3, incomplete='ignore', fillvalue='x'))
     [('A', 'B', 'C'), ('D', 'E', 'F')]
 
-    When *incomplete* is `'strict'`, a subclass of `ValueError` will be raised.
+    When *incomplete* is `'strict'`, a `ValueError` will be raised.
 
     >>> iterator = grouper('ABCDEFG', 3, incomplete='strict')
     >>> list(iterator)  # doctest: +IGNORE_EXCEPTION_DETAIL
     Traceback (most recent call last):
     ...
-    UnequalIterablesError
+    ValueError
 
     """
     iterators = [iter(iterable)] * n
-    if incomplete == 'fill':
-        return zip_longest(*iterators, fillvalue=fillvalue)
-    if incomplete == 'strict':
-        return _zip_equal(*iterators)
-    if incomplete == 'ignore':
-        return zip(*iterators)
-    else:
-        raise ValueError('Expected fill, strict, or ignore')
+    match incomplete:
+        case 'fill':
+            return zip_longest(*iterators, fillvalue=fillvalue)
+        case 'strict':
+            return zip(*iterators, strict=True)
+        case 'ignore':
+            return zip(*iterators)
+        case _:
+            raise ValueError('Expected fill, strict, or ignore')
 
 
 def roundrobin(*iterables):
@@ -807,23 +749,9 @@ def before_and_after(predicate, it):
     Note that the first iterator must be fully consumed before the second
     iterator can generate valid results.
     """
-    it = iter(it)
-    transition = []
-
-    def true_iterator():
-        for elem in it:
-            if predicate(elem):
-                yield elem
-            else:
-                transition.append(elem)
-                return
-
-    # Note: this is different from itertools recipes to allow nesting
-    # before_and_after remainders into before_and_after again. See tests
-    # for an example.
-    remainder_iterator = chain(transition, it)
-
-    return true_iterator(), remainder_iterator
+    trues, after = tee(it)
+    trues = compress(takewhile(predicate, trues), zip(after))
+    return trues, after
 
 
 def triplewise(iterable):
@@ -909,9 +837,11 @@ def polynomial_from_roots(roots):
 
     Supports all numeric types: int, float, complex, Decimal, Fraction.
     """
+
     # This recipe differs from the one in itertools docs in that it
     # applies list() after each call to convolve().  This avoids
     # hitting stack limits with nested generators.
+
     poly = [1]
     for root in roots:
         poly = list(convolve(poly, (1, -root)))
@@ -980,7 +910,7 @@ def sieve(n):
     yield from iter_index(data, 1, start)
 
 
-def _batched(iterable, n, *, strict=False):
+def _batched(iterable, n, *, strict=False):  # pragma: no cover
     """Batch data into tuples of length *n*. If the number of items in
     *iterable* is not divisible by *n*:
     * The last batch will be shorter if *strict* is ``False``.
@@ -1006,10 +936,9 @@ if hexversion >= 0x30D00A2:  # pragma: no cover
     def batched(iterable, n, *, strict=False):
         return itertools_batched(iterable, n, strict=strict)
 
-else:
-    batched = _batched
-
     batched.__doc__ = _batched.__doc__
+else:  # pragma: no cover
+    batched = _batched
 
 
 def transpose(it):
@@ -1021,18 +950,71 @@ def transpose(it):
     The caller should ensure that the dimensions of the input are compatible.
     If the input is empty, no output will be produced.
     """
-    return _zip_strict(*it)
+    return zip(*it, strict=True)
 
 
-def reshape(matrix, cols):
-    """Reshape the 2-D input *matrix* to have a column count given by *cols*.
+def _is_scalar(value, stringlike=(str, bytes)):
+    "Scalars are bytes, strings, and non-iterables."
+    try:
+        iter(value)
+    except TypeError:
+        return True
+    return isinstance(value, stringlike)
 
-    >>> matrix = [(0, 1), (2, 3), (4, 5)]
-    >>> cols = 3
-    >>> list(reshape(matrix, cols))
-    [(0, 1, 2), (3, 4, 5)]
+
+def _flatten_tensor(tensor):
+    "Depth-first iterator over scalars in a tensor."
+    iterator = iter(tensor)
+    while True:
+        try:
+            value = next(iterator)
+        except StopIteration:
+            return iterator
+        iterator = chain((value,), iterator)
+        if _is_scalar(value):
+            return iterator
+        iterator = chain.from_iterable(iterator)
+
+
+def reshape(matrix, shape):
+    """Change the shape of a *matrix*.
+
+    If *shape* is an integer, the matrix must be two dimensional
+    and the shape is interpreted as the desired number of columns:
+
+        >>> matrix = [(0, 1), (2, 3), (4, 5)]
+        >>> cols = 3
+        >>> list(reshape(matrix, cols))
+        [(0, 1, 2), (3, 4, 5)]
+
+    If *shape* is a tuple (or other iterable), the input matrix can have
+    any number of dimensions. It will first be flattened and then rebuilt
+    to the desired shape which can also be multidimensional:
+
+        >>> matrix = [(0, 1), (2, 3), (4, 5)]    # Start with a 3 x 2 matrix
+
+        >>> list(reshape(matrix, (2, 3)))        # Make a 2 x 3 matrix
+        [(0, 1, 2), (3, 4, 5)]
+
+        >>> list(reshape(matrix, (6,)))          # Make a vector of length six
+        [0, 1, 2, 3, 4, 5]
+
+        >>> list(reshape(matrix, (2, 1, 3, 1)))  # Make 2 x 1 x 3 x 1 tensor
+        [(((0,), (1,), (2,)),), (((3,), (4,), (5,)),)]
+
+    Each dimension is assumed to be uniform, either all arrays or all scalars.
+    Flattening stops when the first value in a dimension is a scalar.
+    Scalars are bytes, strings, and non-iterables.
+    The reshape iterator stops when the requested shape is complete
+    or when the input is exhausted, whichever comes first.
+
     """
-    return batched(chain.from_iterable(matrix), cols)
+    if isinstance(shape, int):
+        return batched(chain.from_iterable(matrix), shape)
+    first_dim, *dims = shape
+    scalar_stream = _flatten_tensor(matrix)
+    reshaped = reduce(batched, reversed(dims), scalar_stream)
+    return islice(reshaped, first_dim)
 
 
 def matmul(m1, m2):
@@ -1063,7 +1045,7 @@ def _factor_pollard(n):
             d = gcd(x - y, n)
         if d != n:
             return d
-    raise ValueError('prime or under 5')
+    raise ValueError('prime or under 5')  # pragma: no cover
 
 
 _primes_below_211 = tuple(sieve(211))
@@ -1331,3 +1313,110 @@ def multinomial(*counts):
 
     """
     return prod(map(comb, accumulate(counts), counts))
+
+
+def _running_median_minheap_and_maxheap(iterator):  # pragma: no cover
+    "Non-windowed running_median() for Python 3.14+"
+
+    read = iterator.__next__
+    lo = []  # max-heap
+    hi = []  # min-heap (same size as or one smaller than lo)
+
+    with suppress(StopIteration):
+        while True:
+            heappush_max(lo, heappushpop(hi, read()))
+            yield lo[0]
+
+            heappush(hi, heappushpop_max(lo, read()))
+            yield (lo[0] + hi[0]) / 2
+
+
+def _running_median_minheap_only(iterator):  # pragma: no cover
+    "Backport of non-windowed running_median() for Python 3.13 and prior."
+
+    read = iterator.__next__
+    lo = []  # max-heap (actually a minheap with negated values)
+    hi = []  # min-heap (same size as or one smaller than lo)
+
+    with suppress(StopIteration):
+        while True:
+            heappush(lo, -heappushpop(hi, read()))
+            yield -lo[0]
+
+            heappush(hi, -heappushpop(lo, -read()))
+            yield (hi[0] - lo[0]) / 2
+
+
+def _running_median_windowed(iterator, maxlen):
+    "Yield median of values in a sliding window."
+
+    window = deque()
+    ordered = []
+
+    for x in iterator:
+        window.append(x)
+        insort(ordered, x)
+
+        if len(ordered) > maxlen:
+            i = bisect_left(ordered, window.popleft())
+            del ordered[i]
+
+        n = len(ordered)
+        m = n // 2
+        yield ordered[m] if n & 1 else (ordered[m - 1] + ordered[m]) / 2
+
+
+def running_median(iterable, *, maxlen=None):
+    """Cumulative median of values seen so far or values in a sliding window.
+
+    Set *maxlen* to a positive integer to specify the maximum size
+    of the sliding window.  The default of *None* is equivalent to
+    an unbounded window.
+
+    For example:
+
+        >>> list(running_median([5.0, 9.0, 4.0, 12.0, 8.0, 9.0]))
+        [5.0, 7.0, 5.0, 7.0, 8.0, 8.5]
+        >>> list(running_median([5.0, 9.0, 4.0, 12.0, 8.0, 9.0], maxlen=3))
+        [5.0, 7.0, 5.0, 9.0, 8.0, 9.0]
+
+    Supports numeric types such as int, float, Decimal, and Fraction,
+    but not complex numbers which are unorderable.
+
+    On version Python 3.13 and prior, max-heaps are simulated with
+    negative values. The negation causes Decimal inputs to apply context
+    rounding, making the results slightly different than that obtained
+    by statistics.median().
+    """
+
+    iterator = iter(iterable)
+
+    if maxlen is not None:
+        maxlen = index(maxlen)
+        if maxlen <= 0:
+            raise ValueError('Window size should be positive')
+        return _running_median_windowed(iterator, maxlen)
+
+    if not _max_heap_available:
+        return _running_median_minheap_only(iterator)  # pragma: no cover
+
+    return _running_median_minheap_and_maxheap(iterator)  # pragma: no cover
+
+
+def random_derangement(iterable):
+    """Return a random derangement of elements in the iterable.
+
+    Equivalent to but much faster than ``choice(list(derangements(iterable)))``.
+
+    """
+    seq = tuple(iterable)
+    if len(seq) < 2:
+        if len(seq) == 0:
+            return ()
+        raise IndexError('No derangments to choose from')
+    perm = list(range(len(seq)))
+    start = tuple(perm)
+    while True:
+        shuffle(perm)
+        if not any(map(is_, start, perm)):
+            return itemgetter(*perm)(seq)

@@ -5,8 +5,8 @@ import gc
 import platform
 import weakref
 
-from collections import Counter, abc, deque
-from collections.abc import Set
+from collections import Counter, deque
+from collections.abc import Set, Sequence, Iterable, Iterator, Hashable
 from datetime import datetime, timedelta
 from decimal import Decimal
 from doctest import DocTestSuite
@@ -31,10 +31,9 @@ from pickle import loads, dumps
 from random import Random, random, randrange, seed
 from statistics import mean
 from string import ascii_letters
-from sys import version_info
 from time import sleep
-from typing import Iterable, Iterator, NamedTuple
-from unittest import skipIf, TestCase
+from typing import NamedTuple
+from unittest import TestCase, mock
 
 import more_itertools as mi
 
@@ -179,6 +178,16 @@ class LastTests(TestCase):
             with self.subTest(iterable=iterable):
                 with self.assertRaises(ValueError):
                     mi.last(iterable)
+
+    def test_reversed_is_none(self):
+        # See https://github.com/more-itertools/more-itertools/issues/1001
+        class ReversedIsNone:
+            __reversed__ = None
+
+            def __iter__(self):
+                return iter([1])
+
+        self.assertEqual(mi.last(ReversedIsNone()), 1)
 
 
 class NthOrLastTests(TestCase):
@@ -1204,6 +1213,42 @@ class InterleaveEvenlyTests(TestCase):
             list(mi.interleave_evenly(iterables, lengths=lengths))
 
 
+class InterleaveRandomlyTests(TestCase):
+    def test_basic(self):
+        seed(0)  # For reproducibility
+        iterables = [1, 2, 3], 'abc', (True, False, None)
+        self.assertEqual(
+            list(mi.interleave_randomly(*iterables)),
+            ['a', 'b', 1, 'c', True, False, None, 2, 3],
+        )
+
+    def test_some_empty(self):
+        self.assertEqual(
+            list(mi.interleave_randomly([1, 2, 3], [], [])),
+            [1, 2, 3],
+        )
+        self.assertEqual(
+            list(mi.interleave_randomly([], [1, 2, 3], [])),
+            [1, 2, 3],
+        )
+        self.assertEqual(
+            list(mi.interleave_randomly([], [], [1, 2, 3])),
+            [1, 2, 3],
+        )
+
+    def test_all_empty(self):
+        iterables = [], [], []
+        self.assertEqual(list(mi.interleave_randomly(*iterables)), [])
+
+    def test_no_args(self):
+        self.assertEqual(list(mi.interleave_randomly()), [])
+
+    def test_bad_type(self):
+        # Should raise TypeError if not all arguments are iterable
+        with self.assertRaises(TypeError):
+            list(mi.interleave_randomly(1, [2, 3], 'abc'))
+
+
 class TestCollapse(TestCase):
     """Tests for ``collapse()``"""
 
@@ -1979,58 +2024,6 @@ class StaggerTest(TestCase):
             self.assertEqual(list(all_groups), expected)
 
 
-class ZipEqualTest(TestCase):
-    @skipIf(version_info[:2] < (3, 10), 'zip_equal deprecated for 3.10+')
-    def test_deprecation(self):
-        with self.assertWarns(DeprecationWarning):
-            self.assertEqual(
-                list(mi.zip_equal([1, 2], [3, 4])), [(1, 3), (2, 4)]
-            )
-
-    def test_equal(self):
-        lists = [0, 1, 2], [2, 3, 4]
-
-        for iterables in [lists, map(iter, lists)]:
-            actual = list(mi.zip_equal(*iterables))
-            expected = [(0, 2), (1, 3), (2, 4)]
-            self.assertEqual(actual, expected)
-
-    def test_unequal_lists(self):
-        two_items = [0, 1]
-        three_items = [2, 3, 4]
-        four_items = [5, 6, 7, 8]
-
-        # the mismatch is at index 1
-        try:
-            list(mi.zip_equal(two_items, three_items, four_items))
-        except mi.UnequalIterablesError as e:
-            self.assertEqual(
-                e.args[0],
-                (
-                    'Iterables have different lengths: '
-                    'index 0 has length 2; index 1 has length 3'
-                ),
-            )
-
-        # the mismatch is at index 2
-        try:
-            list(mi.zip_equal(two_items, two_items, four_items, four_items))
-        except mi.UnequalIterablesError as e:
-            self.assertEqual(
-                e.args[0],
-                (
-                    'Iterables have different lengths: '
-                    'index 0 has length 2; index 2 has length 4'
-                ),
-            )
-
-        # One without length: delegate to _zip_equal_generator
-        try:
-            list(mi.zip_equal(two_items, iter(two_items), three_items))
-        except mi.UnequalIterablesError as e:
-            self.assertEqual(e.args[0], 'Iterables have different lengths')
-
-
 class ZipOffsetTest(TestCase):
     """Tests for ``zip_offset()``"""
 
@@ -2246,7 +2239,7 @@ class SortTogetherTest(TestCase):
     def test_strict(self):
         # Test for list of lists or tuples
         self.assertRaises(
-            mi.UnequalIterablesError,
+            ValueError,
             lambda: mi.sort_together(
                 [(4, 3, 2, 1), ('a', 'b', 'c')], strict=True
             ),
@@ -2254,13 +2247,13 @@ class SortTogetherTest(TestCase):
 
         # Test for list of iterables
         self.assertRaises(
-            mi.UnequalIterablesError,
+            ValueError,
             lambda: mi.sort_together([range(4), range(5)], strict=True),
         )
 
         # Test for iterable of iterables
         self.assertRaises(
-            mi.UnequalIterablesError,
+            ValueError,
             lambda: mi.sort_together(
                 (range(i) for i in range(4)), strict=True
             ),
@@ -3093,10 +3086,10 @@ class NumericRangeTests(TestCase):
 
     def test_parent_classes(self):
         r = mi.numeric_range(7.0)
-        self.assertTrue(isinstance(r, abc.Iterable))
-        self.assertFalse(isinstance(r, abc.Iterator))
-        self.assertTrue(isinstance(r, abc.Sequence))
-        self.assertTrue(isinstance(r, abc.Hashable))
+        self.assertTrue(isinstance(r, Iterable))
+        self.assertFalse(isinstance(r, Iterator))
+        self.assertTrue(isinstance(r, Sequence))
+        self.assertTrue(isinstance(r, Hashable))
 
     def test_bad_key(self):
         r = mi.numeric_range(7.0)
@@ -3360,17 +3353,13 @@ class IsliceExtendedTests(TestCase):
 
             # testcases for: start>0, stop<0, step>0
             TestCase(initialSize=3, slice=(None, -1, 1), expectedAliveStates=[
-                # ⚠️could be improved, current element is released just one step too late  # noqa: E501
-                [1, 1, 1], [1, 1, 1], [0, 1, 1], [0, 0, 0]]),
+                [1, 1, 1], [0, 1, 1], [0, 0, 1], [0, 0, 0]]),
             TestCase(initialSize=4, slice=(1, -1, 1), expectedAliveStates=[
-                # ⚠️could be improved, current element is released just one step too late  # noqa: E501
-                [1, 1, 1, 1], [0, 1, 1, 1], [0, 0, 1, 1], [0, 0, 0, 0]]),
+                [1, 1, 1, 1], [0, 0, 1, 1], [0, 0, 0, 1], [0, 0, 0, 0]]),
             TestCase(initialSize=5, slice=(None, -2, 2), expectedAliveStates=[
-                # ⚠️could be improved, current element is released just one step too late  # noqa: E501
-                [1, 1, 1, 1, 1], [1, 1, 1, 1, 1], [0, 0, 1, 1, 1], [0, 0, 0, 0, 0]]),  # noqa: E501
-            TestCase(initialSize=5, slice=(1, -1, 2), expectedAliveStates=[
-                # ⚠️could be improved, current element is released just one step too late  # noqa: E501
                 [1, 1, 1, 1, 1], [0, 1, 1, 1, 1], [0, 0, 0, 1, 1], [0, 0, 0, 0, 0]]),  # noqa: E501
+            TestCase(initialSize=5, slice=(1, -1, 2), expectedAliveStates=[
+                [1, 1, 1, 1, 1], [0, 0, 1, 1, 1], [0, 0, 0, 0, 1], [0, 0, 0, 0, 0]]),  # noqa: E501
             TestCase(initialSize=5, slice=(4, -5, 2), expectedAliveStates=[
                 [1, 1, 1, 1, 1], [0, 0, 0, 0, 0]]),
 
@@ -4172,6 +4161,12 @@ class SetPartitionsTests(TestCase):
             self._normalize_partitions(actual),
         )
 
+    def test_min_max(self):
+        it = 'abcdefg'
+        self.assertEqual(
+            list(mi.set_partitions(it, min_size=4, max_size=3)), []
+        )
+
 
 class TimeLimitedTests(TestCase):
     def test_basic(self):
@@ -4940,6 +4935,12 @@ class ProductIndexTests(TestCase):
     def test_invalid_match(self):
         with self.assertRaises(ValueError):
             mi.product_index('axf', 'ab', 'cde', 'fghi')
+
+    def test_iterator_input(self):
+        self.assertEqual(
+            mi.product_index(iter(['i', 'a']), iter('snicker'), iter('snack')),
+            12,
+        )
 
 
 class CombinationIndexTests(TestCase):
@@ -5779,6 +5780,10 @@ class IequalsTests(TestCase):
     def test_not_identical_but_equal(self):
         self.assertTrue([1, True], [1.0, complex(1, 0)])
 
+    def test_fillvalue_not_fakeable(self):
+        # See https://github.com/more-itertools/more-itertools/issues/900
+        self.assertFalse(mi.iequals([], [mock.ANY]))
+
 
 class ConstrainedBatchesTests(TestCase):
     def test_basic(self):
@@ -6146,6 +6151,16 @@ class PowersetOfSetsTests(TestCase):
         self.assertEqual(len(list(mi.powerset_of_sets(iterable))), 128)
         self.assertLessEqual(hash_count, 14)
 
+    def test_baseset(self):
+        iterable = [0, 1, 2]
+        for kind in (set, frozenset):
+            ps = list(mi.powerset_of_sets(iterable, baseset=kind))
+            self.assertEqual(set(map(type, ps)), {kind})
+
+        # Verify that an actual set can be formed.
+        ps = set(mi.powerset_of_sets('abc', baseset=frozenset))
+        self.assertIn({'a', 'b'}, ps)
+
 
 class JoinMappingTests(TestCase):
     def test_basic(self):
@@ -6256,3 +6271,106 @@ class ArgMinArgMaxTests(TestCase):
             with self.subTest(i=i):
                 self.assertEqual(mi.argmin(iterable, key=key), expected_min)
                 self.assertEqual(mi.argmax(iterable, key=key), expected_max)
+
+
+class ExtractTests(TestCase):
+    def test_basics(self):
+        extract = mi.extract
+        data = 'abcdefghijklmnopqrstuvwxyz'
+
+        # Test iterator inputs, increasing and decreasing indices, and repeats.
+        self.assertEqual(
+            list(extract(iter(data), iter([7, 4, 11, 11, 14]))),
+            ['h', 'e', 'l', 'l', 'o'],
+        )
+
+        # Empty indices
+        self.assertEqual(list(extract(iter(data), iter([]))), [])
+
+        # Result is an iterator
+        iterator = extract('abc', [0, 1, 2])
+        self.assertTrue(hasattr(iterator, '__next__'))
+
+        # Error cases
+
+        with self.assertRaises(TypeError):
+            list(extract(None, []))  # Non-iterable data source
+        with self.assertRaises(TypeError):
+            list(extract(data, None))  # Non-iterable indices
+        with self.assertRaises(ValueError):
+            list(extract(data, [0.0, 1.0, 2.0]))  # Non-integer indices
+        with self.assertRaises(ValueError):
+            list(extract(data, [1, 2, -3]))  # Negative indices
+        with self.assertRaises(IndexError):
+            list(extract(data, [1, 2, len(data)]))  # Indices out of range
+
+    def test_negative_one_bug(self):
+        # When the lowest index was exactly -1, it matched the initial
+        # iterator_position of -1 giving a zero advance step.
+        extract = mi.extract
+
+        with self.assertRaises(ValueError):
+            list(extract('abcdefg', [1, 2, -1]))
+
+    def test_none_value_bug(self):
+        # The buffer used to be a list with unused slots marked with None.
+        # The mark got conflated with None values in the data stream.
+        extract = mi.extract
+        data = ['a', 'b', 'None', 'c', 'd']
+        self.assertEqual(list(extract(data, range(5))), data)
+
+    def test_all_orderings(self):
+        # Thorough test for all cases of five indices to detect
+        # obscure corner case bugs.
+        extract = mi.extract
+
+        data = 'abcdefg'
+        for indices in product(range(6), repeat=5):
+            with self.subTest(indices=indices):
+                actual = tuple(extract(data, indices))
+                expected = itemgetter(*indices)(data)
+                self.assertEqual(actual, expected)
+
+    def test_early_free(self):
+        # No references are held for skipped values or for previously
+        # emitted values regardless of how long they were in the buffer.
+
+        extract = mi.extract
+
+        class TrackDels(str):
+            def __del__(self):
+                dead.add(str(self))
+
+        dead = set()
+        iterator = extract(map(TrackDels, 'ABCDEF'), [3, 2, 4, 5])
+
+        value = next(iterator)
+        gc.collect()  # Force collection on PyPy.
+        self.assertEqual(value, 'D')  #  Returns D.  Buffered C is alive.
+        self.assertEqual(dead, {'A', 'B'})  # A and B are dead.
+
+        value = next(iterator)
+        gc.collect()  # Force collection on PyPy
+        self.assertEqual(value, 'C')  #  Returns C.
+
+        value = next(iterator)
+        gc.collect()  # Force collection on PyPy
+        self.assertEqual(value, 'E')  #  Returns E.
+        self.assertEqual(dead, {'A', 'B', 'D', 'C'})  # D and C are now dead.
+
+    def test_lazy_consumption(self):
+        extract = mi.extract
+
+        input_stream = mi.peekable(iter('ABCDEFGHIJKLM'))
+        iterator = extract(input_stream, [4, 2, 10])
+
+        self.assertEqual(next(iterator), 'E')  # C is still buffered
+        self.assertEqual(input_stream.peek(), 'F')
+
+        self.assertEqual(next(iterator), 'C')
+        self.assertEqual(input_stream.peek(), 'F')
+
+        # Infinite input
+        self.assertEqual(
+            list(extract(count(), [5, 7, 3, 9, 4])), [5, 7, 3, 9, 4]
+        )
